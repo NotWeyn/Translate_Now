@@ -18,8 +18,11 @@ Alternatif çeviri servisleri arasında geçiş yapabilme özelliği eklenmişti
 - Uygulama penceresi kapandığında tüm işlemler sonlanır
 
 Kurulum:
+   
     -pip install pyautogui pytesseract googletrans==4.0.0-rc1 keyboard pillow request
+   
     -LibreTranslate API için: pip install libretranslatepy
+   
     -Tesseract OCR kurulu ve PATH'e ekli olmalı
 
 Kullanım:
