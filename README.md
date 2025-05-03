@@ -1,38 +1,51 @@
-"""
-Ekranın belirli bir bölgesinden İngilizce metni çeviren interaktif bir Python aplikasyonu.
-Alternatif çeviri servisleri arasında geçiş yapabilme özelliği eklenmiştir.
+## Genel Bilgiler
+Bu uygulama, ekrandan metin okuyarak (OCR) çeşitli çeviri servisleri aracılığıyla gerçek zamanlı çeviri yapmanızı sağlar.
 
-Özellikler:
-- OCR ile seçilen bölgeden metin okuma (pyautogui + pytesseract)
-- İki farklı çeviri servisi arasında geçiş yapma imkanı
-  * Google Translate çevirisi (API anahtarı gerektirmez)
-  * LibreTranslate çevirisi (API anahtarı gerektirmez)
-- Klavye kısayolları: 
-  * '1' ile çeviri başlat
-  * '2' ile durdur
-- Çeviri metni genişler; ekrandan taşınca alt satıra kaydırır (word-wrap)
-- "Çeviri aktif" animasyonlu etiketi sağ üst köşede gösterir
-- Şeffaf overlay pencere (Windows için)
-- OCR ve gösterim bölgelerini çerçeveleyen overlay çizgileri: göster/gizle tuşu
-- Ayar değişikliklerini JSON dosyasına kaydederek kalıcılık sağlar
-- Uygulama penceresi kapandığında tüm işlemler sonlanır
+## Bölgeler
+- **OCR Bölgesi**: Metni okumak istediğiniz ekran alanı (beyaz çerçeve ile gösterilir)
+- **Çeviri Gösterim Bölgesi**: Çevrilmiş metnin gösterileceği alan (kesikli beyaz çerçeve)
+- **Kaynak Metin Bölgesi**: OCR ile tanınan orijinal metin (kesikli sarı çerçeve)
 
-Kurulum:
-   
-    -pip install pyautogui pytesseract googletrans==4.0.0-rc1 keyboard pillow request
-   
-    -LibreTranslate API için: pip install libretranslatepy
-   
-    -Tesseract OCR kurulu ve PATH'e ekli olmalı
+## Kısayol Tuşları
+- **1**: Çeviriyi başlat
+- **2**: Çeviriyi durdur
 
-Kullanım:
-    python screen_translate_app.py
-    Ayar penceresindeki "Güncelle" ile değişimleri kaydeder.
-    '1' ile çeviriyi başlatıp, '2' ile durdurun.
-    "Çerçeveleri Gizle/Göster" butonu overlay kutucuklarını kontrol eder.
-"""
+## Çeviri Servisleri
+1. **Google Translate**:
+   - En geniş dil desteği
+   - İnternet bağlantısı gerektirir
+   - Genellikle en doğru sonuçları verir
 
-<!---
-NotWeyn/NotWeyn is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
-You can click the Preview link to take a look at your changes.
---->
+2. **LibreTranslate**:
+   - Açık kaynaklı, ücretsiz bir çeviri servisi
+   - İnternet bağlantısı gerektirir
+   - Birden fazla sunucu arasında otomatik geçiş yapar
+
+3. **Argos Translate**:
+   - Tamamen çevrimdışı çalışır, internet gerektirmez
+   - Dil paketlerinin önceden yüklenmesi gerekir
+   - Sınırlı dil desteği ve doğruluk
+
+## Dil Kodları
+Bazı yaygın dil kodları:
+- en: İngilizce
+- tr: Türkçe
+- de: Almanca
+- fr: Fransızca
+- es: İspanyolca
+- ja: Japonca
+- ko: Korece
+- ru: Rusça
+- zh-cn: Basitleştirilmiş Çince
+
+## Sorun Giderme
+1. **OCR çalışmıyor**: Tesseract'ın doğru kurulduğundan emin olun.
+2. **LibreTranslate hataları**: Farklı bir LibreTranslate sunucusuna otomatik geçiş yapılacaktır.
+3. **Argos çevirisi çalışmıyor**: İlgili dil paketinin yüklü olduğundan emin olun.
+
+## İlerleme Çubuğu
+- **Yeşil**: Çeviri başarılı
+- **Kırmızı**: Çeviri hatası 
+- **Gri**: Çeviri servisi test ediliyor
+
+Daha fazla yardım için https://github.com/pytesseract/tesseract adresini ziyaret edin.
