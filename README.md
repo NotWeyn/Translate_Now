@@ -43,9 +43,4 @@ Bazı yaygın dil kodları:
 2. **LibreTranslate hataları**: Farklı bir LibreTranslate sunucusuna otomatik geçiş yapılacaktır.
 3. **Argos çevirisi çalışmıyor**: İlgili dil paketinin yüklü olduğundan emin olun.
 
-## İlerleme Çubuğu
-- **Yeşil**: Çeviri başarılı
-- **Kırmızı**: Çeviri hatası 
-- **Gri**: Çeviri servisi test ediliyor
-
 Daha fazla yardım için https://github.com/pytesseract/tesseract adresini ziyaret edin.
