@@ -27,12 +27,14 @@ def load_settings():
     default = {
         'region': {'x': 100, 'y': 100, 'width': 400, 'height': 200},
         'display': {'x': 600, 'y': 100, 'width': 500, 'height': 200},
-        'source_display': {'x': 600, 'y': 320, 'width': 500, 'height': 200},  # Yeni: Kaynak metin bölgesi
+        'source_display': {'x': 600, 'y': 320, 'width': 500, 'height': 200},
         'interval_ms': 1000,
         'wraplength': 480,
         'source_lang': 'en',
         'target_lang': 'tr',
-        'translator_service': 'google'  # 'google', 'libretranslate', 'argos'
+        'translator_service': 'google',
+        'ocr_engine': 'tesseract',  # Yeni eklenen alan
+        'cpu_workers': 0  # 0 = tüm çekirdekler
     }
     
     if os.path.exists(SETTINGS_FILE):
@@ -265,6 +267,7 @@ except (TesseractNotFoundError, OSError) as e:
 # -----------------------------------------------------
 # GLOBAL DURUM DEĞİŞKENLERİ
 # -----------------------------------------------------
+easyocr_current_lang = None
 running = False
 app_running = True
 rects_visible = True
@@ -326,6 +329,8 @@ def toggle_rects():
         draw_rectangles()
         status_label.place(x=config['display']['x'], y=config['display']['y'] + config['display']['height'] + 5)
         progress_frame.place(x=config['display']['x'], y=config['display']['y'] + config['display']['height'] + 25)
+        tl.place(x=config['display']['x'], y=config['display']['y'])
+        sl.place(x=config['source_display']['x'], y=config['source_display']['y'])  # Kaynak metin etiketini göster
         if running:
             update_status_label()
         toggle_btn.config(text="Çerçeveleri Gizle")
@@ -333,6 +338,7 @@ def toggle_rects():
         hide_rectangles()
         status_label.place_forget()
         progress_frame.place_forget()
+        sl.place_forget()  # Kaynak metin etiketini gizle
         toggle_btn.config(text="Çerçeveleri Göster")
 
 def update_status_label():
@@ -343,7 +349,12 @@ def update_status_label():
         'argos': 'Argos Translate'
     }.get(config['translator_service'], 'Google')
     
-    status_label.config(text=f"Çeviri: {config['source_lang']} -> {config['target_lang']} ({service_name})")
+    ocr_name = {
+        'tesseract': 'Tesseract OCR',
+        'easyocr': 'EasyOCR'
+    }.get(config.get('ocr_engine', 'tesseract'), 'Tesseract OCR')
+    
+    status_label.config(text=f"OCR: {ocr_name} | Çeviri: {config['source_lang']} -> {config['target_lang']} ({service_name})")
 
 # Etiketler oluştur
 draw_rectangles()
@@ -411,7 +422,7 @@ def update_progress_bar(status="testing"):
 # -----------------------------------------------------
 settings = tk.Toplevel(root)
 settings.title('Bölge Ayarları')
-settings.geometry('365x580')  # Daha büyük pencere
+settings.geometry('490x680')  # Daha büyük pencere
 settings.attributes('-topmost', True)
 settings.protocol('WM_DELETE_WINDOW', lambda: shutdown())
 
@@ -475,6 +486,7 @@ ttk.Label(lang_frame, text='Örn: en, tr, fr, de, es, ja, ko, ru, zh-cn').grid(
 )
 
 # Çeviri servisi seçme
+# Çeviri servisi seçme
 translator_frame = ttk.LabelFrame(settings, text='Çeviri Servisi')
 translator_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
 
@@ -499,104 +511,53 @@ if not ARGOS_AVAILABLE:
     ttk.Label(translator_frame, text="Argos Translate kullanmak için: pip install argostranslate").grid(
         row=1, column=0, columnspan=3, padx=5, pady=5
     )
-    ttk.Label(translator_frame, text="Kurduktan sonra dil paketlerini yüklemelisiniz.").grid(
-        row=2, column=0, columnspan=3, padx=5, pady=0
-    )
-else:
-    def install_argos_packages():
-        """Mevcut dil paketlerini indirip kurar"""
-        try:
-            # Mevcut paketleri getir
-            available_packages = argostranslate.package.get_available_packages()
-            
-            # İlerleme penceresi
-            progress_window = tk.Toplevel()
-            progress_window.title("Dil Paketi Yükleniyor")
-            progress_window.geometry("400x200")
-            progress_window.attributes('-topmost', True)
-            
-            progress_label = ttk.Label(progress_window, text="Dil paketleri indiriliyor ve kuruluyor...")
-            progress_label.pack(pady=20)
-            
-            progress = ttk.Progressbar(progress_window, orient="horizontal", length=300, mode="indeterminate")
-            progress.pack(pady=10)
-            progress.start()
-            
-            # Hangi paketlerin kurulacağını gösteren metin kutusu
-            info_text = tk.Text(progress_window, height=5, width=45)
-            info_text.pack(pady=10)
-            
-            # Paketleri listele
-            info_text.insert(tk.END, "Yüklenecek paketler:\n")
-            for package in available_packages:
-                info_text.insert(tk.END, f"- {package.from_code} -> {package.to_code}\n")
-            
-            # İşlemi başlat
-            progress_window.update()
-            
-            # Tüm mevcut paketleri kur
-            for package in available_packages:
-                progress_label.config(text=f"Yükleniyor: {package.from_code} -> {package.to_code}")
-                progress_window.update()
-                argostranslate.package.install_from_path(package.download())
-            
-            progress.stop()
-            progress_label.config(text="Tüm dil paketleri başarıyla kuruldu!")
-            
-            # Tamam butonu
-            ttk.Button(
-                progress_window, 
-                text="Tamam", 
-                command=progress_window.destroy
-            ).pack(pady=10)
-            
-        except Exception as e:
-            messagebox.showerror("Kurulum Hatası", f"Dil paketleri yüklenirken hata oluştu: {str(e)}")
+    
+# Şimdi OCR motor seçimi ekleyelim
+ocr_frame = ttk.LabelFrame(settings, text='OCR Motoru')
+ocr_frame.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
 
-    def show_installed_packages():
-        """Yüklü dil paketlerini göster"""
-        try:
-            installed = argostranslate.package.get_installed_packages()
-            
-            # Paket penceresi
-            pkg_window = tk.Toplevel()
-            pkg_window.title("Yüklü Dil Paketleri")
-            pkg_window.geometry("300x300")
-            pkg_window.attributes('-topmost', True)
-            
-            if not installed:
-                ttk.Label(pkg_window, text="Yüklü dil paketi bulunamadı.").pack(pady=20)
-            else:
-                ttk.Label(pkg_window, text="Yüklü Dil Paketleri:").pack(pady=10)
-                
-                # Liste görünümü
-                tree = ttk.Treeview(pkg_window, columns=("from", "to"), show="headings")
-                tree.heading("from", text="Kaynak Dil")
-                tree.heading("to", text="Hedef Dil")
-                tree.pack(padx=10, pady=10, fill="both", expand=True)
-                
-                # Paketleri listeye ekle
-                for pkg in installed:
-                    tree.insert("", "end", values=(pkg.from_code, pkg.to_code))
-            
-        except Exception as e:
-            messagebox.showerror("Hata", f"Yüklü paketler listelenirken hata oluştu: {str(e)}")
-    
-    # Argos dil paketi yönetim butonları
-    pkg_frame = ttk.Frame(translator_frame)
-    pkg_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5)
-    
-    ttk.Button(pkg_frame, text="Dil Paketlerini Kur", command=install_argos_packages).grid(
-        row=0, column=0, padx=5, pady=5
-    )
-    
-    ttk.Button(pkg_frame, text="Yüklü Paketleri Göster", command=show_installed_packages).grid(
-        row=0, column=1, padx=5, pady=5
+# CPU kullanımı ayar bölümü (settings bölümünde)
+cpu_frame = ttk.LabelFrame(settings, text='Çeviri Performansı')
+cpu_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
+
+# Speed_value zaten tanımlı olduğu için sadece referans verin
+ttk.Label(cpu_frame, text='Tarama Aralığı (ms):').grid(row=0, column=0, padx=5, pady=5)
+ttk.Label(cpu_frame, text='ms').grid(row=0, column=1, padx=5, pady=5)
+
+ttk.Label(cpu_frame, text='NOT: Performans sorunları yaşıyorsanız tarama aralığı değerini arttırın (1000-2000ms).').grid(
+    row=1, column=0, columnspan=2, padx=5, pady=5
+)
+
+ocr_var = tk.StringVar(value=config.get('ocr_engine', 'tesseract'))
+tesseract_radio = ttk.Radiobutton(ocr_frame, text='Tesseract OCR', value='tesseract', variable=ocr_var)
+tesseract_radio.grid(row=0, column=0, padx=5, pady=5)
+
+# EasyOCR kullanılabilirliğini kontrol et
+EASYOCR_AVAILABLE = False
+try:
+    import easyocr
+    import numpy as np
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    pass
+
+easyocr_radio = ttk.Radiobutton(
+    ocr_frame, 
+    text='EasyOCR' + (" (Kurulu Değil)" if not EASYOCR_AVAILABLE else ""), 
+    value='easyocr', 
+    variable=ocr_var,
+    state=tk.NORMAL if EASYOCR_AVAILABLE else tk.DISABLED
+)
+easyocr_radio.grid(row=0, column=1, padx=5, pady=5)
+
+if not EASYOCR_AVAILABLE:
+    ttk.Label(ocr_frame, text="EasyOCR kullanmak için: pip install easyocr numpy").grid(
+        row=1, column=0, columnspan=2, padx=5, pady=5
     )
 
 # Çeviri hızı ayarı
 speed_frame = ttk.LabelFrame(settings, text='Çeviri Hızı (ms)')
-speed_frame.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
+speed_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
 
 speed_value = IntVar(value=config['interval_ms'])
 speed_scale = Scale(
@@ -612,7 +573,7 @@ speed_scale.grid(row=0, column=0, padx=10, pady=5)
 
 # UI kontrol düğmeleri
 control_frame = ttk.Frame(settings)
-control_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
+control_frame.grid(row=6, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
 
 toggle_btn = ttk.Button(control_frame, text='Çerçeveleri Gizle' if rects_visible else 'Çerçeveleri Göster', command=toggle_rects)
 toggle_btn.grid(row=0, column=0, padx=5, pady=5)
@@ -710,6 +671,8 @@ def apply_settings():
         config['target_lang'] = target_lang_entry.get()
         config['translator_service'] = translator_var.get()
         config['interval_ms'] = speed_value.get()
+        config['ocr_engine'] = ocr_var.get()
+        # cpu_workers referansını kaldırın
         
         # Etiketleri doğru konumlara yerleştir
         tl.place(x=config['display']['x'], y=config['display']['y'])
@@ -747,12 +710,43 @@ def blink():
     if app_running:
         root.after(500, blink)
 
+# Import alanında gerekli modülleri ekleyelim (dosyanın başına)
+try:
+    import easyocr
+    import numpy as np
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+
+# EasyOCR Reader nesnesini global olarak tanımlayalım
+easyocr_reader = None
+easyocr_current_lang = None  # Mevcut dili takip etmek için
+
 def translate_loop():
     """Ana çeviri döngüsü"""
-    global app_running, last_text
+    global app_running, last_text, easyocr_reader, easyocr_current_lang
+    
+    # İlk çalıştırmada EasyOCR okuyucusunu başlat
+    if easyocr_current_lang != config['source_lang']:
+        try:
+            print(f"EasyOCR dil güncellemesi: {config['source_lang']}")
+            # num_workers parametresini kaldır
+            easyocr_reader = easyocr.Reader([config['source_lang']], gpu=False)
+            easyocr_current_lang = config['source_lang']
+        except Exception as e:
+            print(f"EasyOCR dil değiştirme hatası: {e}")
+    
+    last_check_time = time.time()  # Son işlem zamanını takip et
+    min_interval = 0.1  # Minimum işlem aralığı (saniye)
     
     while app_running:
         if running:
+            current_time = time.time()
+            # Minimum aralıktan daha kısa süre geçtiyse bekle
+            if current_time - last_check_time < min_interval:
+                time.sleep(0.01)  # Kısa bir süre bekle
+                continue
+                
             try:
                 # Ekran görüntüsü al
                 img = pyautogui.screenshot(region=(
@@ -762,9 +756,25 @@ def translate_loop():
                     config['region']['height']
                 ))
                 
-                # OCR ile metni çıkar
-                txt = pytesseract.image_to_string(img, lang='eng').strip()
-                txt = " ".join([line.strip() for line in txt.splitlines() if line.strip()])
+                # Seçilen OCR motoruna göre metin çıkar
+                txt = ""
+                if config.get('ocr_engine') == 'easyocr' and EASYOCR_AVAILABLE and easyocr_reader:
+                    # Dil değiştirme kodunu koruyun...
+                    
+                    # EasyOCR ile metni çıkar
+                    try:
+                        img_array = np.array(img)
+                        results = easyocr_reader.readtext(img_array, detail=0)
+                        txt = " ".join(results).strip()
+                    except Exception as e:
+                        print(f"EasyOCR okuma hatası: {e}")
+                        # Hata durumunda Tesseract'a geri dön
+                        txt = pytesseract.image_to_string(img, lang='eng').strip()
+                        txt = " ".join([line.strip() for line in txt.splitlines() if line.strip()])
+                else:
+                    # Tesseract ile metni çıkar
+                    txt = pytesseract.image_to_string(img, lang='eng').strip()
+                    txt = " ".join([line.strip() for line in txt.splitlines() if line.strip()])
                 
                 # Kaynak metni güncelle
                 sl.config(text=txt)
@@ -782,11 +792,13 @@ def translate_loop():
                     
                     if rects_visible:
                         update_status_label()
+                
+                last_check_time = time.time()  # Son kontrol zamanını güncelle
             except Exception as e:
                 if rects_visible:
                     status_label.config(text=f"Hata: {str(e)}")
         
-        # Ayarlanan hızda bekle
+        # CPU yükünü azaltmak için daha uzun aralıklarla çalıştır
         time.sleep(config['interval_ms'] / 1000)
 
 # Çeviri işlemini arka planda başlat
@@ -806,9 +818,12 @@ def start():
 
 def stop():
     """Çeviriyi durdur"""
-    global running
+    global running, last_text
     running = False
     active_label.place_forget()
+    tl.config(text='')  # Çeviri metnini temizle
+    sl.config(text='')  # Kaynak metni temizle
+    last_text = ""      # Son metni sıfırla
     if rects_visible:
         status_label.config(text='')
 
