@@ -13,6 +13,24 @@ from pytesseract import TesseractNotFoundError
 import keyboard
 from googletrans import Translator
 
+try:
+    from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+    from PIL import Image
+    TROCR_AVAILABLE = True
+except ImportError:
+    TROCR_AVAILABLE = False
+
+# DocTR için gerekli importlar
+try:
+    import doctr
+    from doctr.io import DocumentFile
+    from doctr.models import ocr_predictor
+    DOCTR_AVAILABLE = True
+    print("DocTR başarıyla import edildi")
+except (ImportError, ModuleNotFoundError) as e:
+    print(f"DocTR import hatası: {e}")
+    DOCTR_AVAILABLE = False
+
 # -----------------------------------------------------
 # TESSERACT YOLU AYARI
 # -----------------------------------------------------
@@ -33,7 +51,7 @@ def load_settings():
         'source_lang': 'en',
         'target_lang': 'tr',
         'translator_service': 'google',
-        'ocr_engine': 'tesseract',  # Yeni eklenen alan
+        'ocr_engine': 'tesseract',  # 'tesseract', 'easyocr', 'trocr', 'doctr'
         'cpu_workers': 0  # 0 = tüm çekirdekler
     }
     
@@ -273,6 +291,9 @@ app_running = True
 rects_visible = True
 last_text = ""
 progress_value = 0
+trocr_processor = None
+trocr_model = None
+doctr_predictor = None
 
 # -----------------------------------------------------
 # TKINTER ANA PENCERE VE OVERLAY KURULUMU
@@ -351,7 +372,9 @@ def update_status_label():
     
     ocr_name = {
         'tesseract': 'Tesseract OCR',
-        'easyocr': 'EasyOCR'
+        'easyocr': 'EasyOCR',
+        'trocr': 'TrOCR',
+        'doctr': 'DocTR'
     }.get(config.get('ocr_engine', 'tesseract'), 'Tesseract OCR')
     
     status_label.config(text=f"OCR: {ocr_name} | Çeviri: {config['source_lang']} -> {config['target_lang']} ({service_name})")
@@ -555,6 +578,37 @@ if not EASYOCR_AVAILABLE:
         row=1, column=0, columnspan=2, padx=5, pady=5
     )
 
+trocr_radio = ttk.Radiobutton(
+    ocr_frame, 
+    text='TrOCR' + (" (Kurulu Değil)" if not TROCR_AVAILABLE else ""), 
+    value='trocr', 
+    variable=ocr_var,
+    state=tk.NORMAL if TROCR_AVAILABLE else tk.DISABLED
+)
+trocr_radio.grid(row=1, column=0, padx=5, pady=5)
+
+doctr_radio = ttk.Radiobutton(
+    ocr_frame, 
+    text='DocTR' + (" (Kurulu Değil)" if not DOCTR_AVAILABLE else ""), 
+    value='doctr', 
+    variable=ocr_var,
+    state=tk.NORMAL if DOCTR_AVAILABLE else tk.DISABLED
+)
+doctr_radio.grid(row=1, column=1, padx=5, pady=5)
+
+# Kurulum bilgilerini ekleyin
+if not TROCR_AVAILABLE or not DOCTR_AVAILABLE:
+    install_text = ""
+    if not TROCR_AVAILABLE:
+        install_text += "TrOCR: pip install transformers torch Pillow\n"
+    if not DOCTR_AVAILABLE:
+        install_text += "DocTR: pip install python-doctr"
+    
+    ttk.Label(ocr_frame, text=install_text.strip()).grid(
+        row=2, column=0, columnspan=2, padx=5, pady=5
+    )
+
+
 # Çeviri hızı ayarı
 speed_frame = ttk.LabelFrame(settings, text='Çeviri Hızı (ms)')
 speed_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
@@ -746,7 +800,7 @@ def translate_loop():
             if current_time - last_check_time < min_interval:
                 time.sleep(0.01)  # Kısa bir süre bekle
                 continue
-                
+
             try:
                 # Ekran görüntüsü al
                 img = pyautogui.screenshot(region=(
@@ -758,9 +812,9 @@ def translate_loop():
                 
                 # Seçilen OCR motoruna göre metin çıkar
                 txt = ""
-                if config.get('ocr_engine') == 'easyocr' and EASYOCR_AVAILABLE and easyocr_reader:
-                    # Dil değiştirme kodunu koruyun...
-                    
+                ocr_engine = config.get('ocr_engine', 'tesseract')
+
+                if ocr_engine == 'easyocr' and EASYOCR_AVAILABLE and easyocr_reader:
                     # EasyOCR ile metni çıkar
                     try:
                         img_array = np.array(img)
@@ -768,36 +822,80 @@ def translate_loop():
                         txt = " ".join(results).strip()
                     except Exception as e:
                         print(f"EasyOCR okuma hatası: {e}")
-                        # Hata durumunda Tesseract'a geri dön
-                        txt = pytesseract.image_to_string(img, lang='eng').strip()
-                        txt = " ".join([line.strip() for line in txt.splitlines() if line.strip()])
-                else:
-                    # Tesseract ile metni çıkar
-                    txt = pytesseract.image_to_string(img, lang='eng').strip()
-                    txt = " ".join([line.strip() for line in txt.splitlines() if line.strip()])
-                
-                # Kaynak metni güncelle
-                sl.config(text=txt)
-                
-                # Sadece metin değiştiyse çevir
-                if txt and txt != last_text:
-                    last_text = txt
+                        txt = ""  # Hata durumunda boş metin döndür, otomatik geçiş yok
+                        
+                elif ocr_engine == 'trocr' and TROCR_AVAILABLE:
+                    # TrOCR ile metni çıkar
+                    global trocr_processor, trocr_model
                     
-                    if rects_visible:
-                        status_label.config(text="Çeviriliyor...")
+                    try:
+                        # Model ve işlemci yüklü değilse yükle (ilk kullanımda)
+                        if trocr_processor is None or trocr_model is None:
+                            trocr_processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
+                            trocr_model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
+                            print("TrOCR modeli yüklendi")
+                        
+                        # Görüntüyü işle
+                        pixel_values = trocr_processor(images=img, return_tensors="pt").pixel_values
+                        generated_ids = trocr_model.generate(pixel_values)
+                        generated_text = trocr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                        txt = generated_text.strip()
+                    except Exception as e:
+                        print(f"TrOCR okuma hatası: {e}")
+                        txt = ""
+                        
+                elif ocr_engine == 'doctr' and DOCTR_AVAILABLE:
+                    # DocTR ile metni çıkar
+                    global doctr_predictor
+                    
+                    try:
+                        # Tahmin edici yüklü değilse yükle (ilk kullanımda)
+                        if doctr_predictor is None:
+                            doctr_predictor = ocr_predictor(pretrained=True)
+                            print("DocTR modeli yüklendi")
+                        
+                        # Mutlak yol kullanarak görüntüyü kaydet
+                        temp_img_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'temp_ocr_img.png'))
+                        img.save(temp_img_path)
+                        print(f"Görüntü kaydedildi: {temp_img_path}")
+                        
+                        # DocTR belge işleme - normalleştirilmiş yol kullanarak
+                        doc = DocumentFile.from_images([temp_img_path])
+                        result = doctr_predictor(doc)
+                        
+                        # Sonuçları metin olarak çıkar
+                        txt = result.render()
+                        print(f"DocTR sonucu: {txt}")
+                        
+                        # Geçici dosyayı sil
+                        try:
+                            os.remove(temp_img_path)
+                        except Exception as e:
+                            print(f"Geçici dosya silinemedi: {e}")
+                    except Exception as e:
+                        print(f"DocTR okuma hatası: {e}")
+                        txt = ""
+                
+                # Metin değiştiyse ve boş değilse çeviri yap
+                if txt and txt != last_text:
+                    sl.config(text=txt)  # Kaynak metni güncelle
                     
                     # Çeviri yap
-                    translated = translate_text(txt, config['source_lang'], config['target_lang'])
-                    tl.config(text=translated)
+                    update_progress_bar("testing")
+                    trans_text = translate_text(txt, config['source_lang'], config['target_lang'])
                     
-                    if rects_visible:
-                        update_status_label()
-                
-                last_check_time = time.time()  # Son kontrol zamanını güncelle
+                    if trans_text:
+                        tl.config(text=trans_text)  # Çeviriyi göster
+                        update_progress_bar("success")
+                    else:
+                        update_progress_bar("error")
+                    
+                    last_text = txt  # Son metni güncelle
+                    last_check_time = time.time()  # Son işlem zamanını güncelle
             except Exception as e:
-                if rects_visible:
-                    status_label.config(text=f"Hata: {str(e)}")
-        
+                print(f"Çeviri döngüsünde hata: {e}")
+                update_progress_bar("error")
+                
         # CPU yükünü azaltmak için daha uzun aralıklarla çalıştır
         time.sleep(config['interval_ms'] / 1000)
 
